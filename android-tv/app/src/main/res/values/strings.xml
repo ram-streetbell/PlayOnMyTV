@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PlayOnMyTV</string>
+    <string name="app_name_uppercase">PLAYONMYTV</string>
+    <string name="pairing_title">Pairing Screen</string>
+    <string name="device_code_label">Device Code</string>
+    <string name="waiting_for_pairing">Waiting for pairing...</string>
+    <string name="generic_error">Something went wrong. Please try again.</string>
+    <string name="player_placeholder">Player ready. Playback implementation comes next.</string>
+    <string name="settings_title">Settings Screen</string>
+</resources>

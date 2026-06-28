@@ -1,0 +1,32 @@
+{
+    "name": "playonmytv/platform",
+    "description": "PlayOnMyTV offline-first digital signage platform scaffold",
+    "type": "project",
+    "require": {
+        "cloudinary/cloudinary_php": "^2.0",
+        "php": "^8.2",
+        "ext-fileinfo": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        },
+        "files": [
+            "app/Support/helpers.php"
+        ]
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php -r \"if (!is_dir('storage/logs')) mkdir('storage/logs', 0777, true);\"",
+            "@php -r \"if (!is_dir('storage/cache')) mkdir('storage/cache', 0777, true);\"",
+            "@php -r \"if (!is_dir('storage/temp')) mkdir('storage/temp', 0777, true);\""
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

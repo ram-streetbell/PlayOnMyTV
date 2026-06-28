@@ -1,0 +1,12 @@
+body {
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.nav-link {
+    color: #1f2937;
+}
+
+.nav-link:hover {
+    color: #0d6efd;
+}
+

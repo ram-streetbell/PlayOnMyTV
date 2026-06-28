@@ -1,0 +1,17 @@
+.env
+/vendor/
+/storage/logs/*.log
+/storage/cache/*
+/storage/temp/*
+/public/uploads/*
+!/public/uploads/.gitkeep
+/.idea/
+/.vscode/
+/.DS_Store
+Thumbs.db
+/android-tv/.gradle/
+/android-tv/local.properties
+/android-tv/**/build/
+/android-tv/captures/
+*.iml
+
