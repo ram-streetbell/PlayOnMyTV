@@ -6,7 +6,6 @@ namespace App\Core;
 
 use PDO;
 use PDOException;
-use RuntimeException;
 
 class Database
 {
@@ -19,6 +18,7 @@ class Database
         }
 
         $config = config('database');
+
         $dsn = sprintf(
             '%s:host=%s;port=%d;dbname=%s;charset=%s',
             $config['driver'],
@@ -29,16 +29,29 @@ class Database
         );
 
         try {
-            self::$connection = new PDO($dsn, $config['username'], $config['password'], [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
+            self::$connection = new PDO(
+                $dsn,
+                $config['username'],
+                $config['password'],
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false,
+                ]
+            );
         } catch (PDOException $exception) {
-            throw new RuntimeException('Database connection failed.', 0, $exception);
+
+            die(
+                "<h2>Database Connection Error</h2>" .
+                "<pre>" .
+                "Message: " . $exception->getMessage() . "\n\n" .
+                "DSN: " . $dsn . "\n\n" .
+                "Username: " . $config['username'] . "\n\n" .
+                $exception->getTraceAsString() .
+                "</pre>"
+            );
         }
 
         return self::$connection;
     }
 }
-

@@ -8,8 +8,10 @@ import com.playonmytv.data.remote.ApiService
 import com.playonmytv.data.remote.ManifestApi
 import com.playonmytv.data.repository.DownloadRepository
 import com.playonmytv.data.repository.DeviceRepositoryImpl
+import com.playonmytv.data.repository.LocalPlaybackRepositoryImpl
 import com.playonmytv.data.repository.ManifestRepository
 import com.playonmytv.domain.repository.DeviceRepository
+import com.playonmytv.domain.repository.LocalPlaybackRepository
 import com.playonmytv.domain.repository.MediaRepository
 import com.playonmytv.player.download.DownloadManager
 import com.playonmytv.player.download.MediaDownloader
@@ -17,6 +19,7 @@ import com.playonmytv.player.download.MediaStorageHelper
 import okhttp3.OkHttpClient
 import com.playonmytv.sync.ManifestComparator
 import com.playonmytv.sync.ManifestSyncService
+import java.util.concurrent.TimeUnit
 
 object ServiceLocator {
     @Volatile
@@ -37,6 +40,8 @@ object ServiceLocator {
     private var manifestComparator: ManifestComparator? = null
     @Volatile
     private var manifestSyncService: ManifestSyncService? = null
+    @Volatile
+    private var localPlaybackRepository: LocalPlaybackRepository? = null
 
     fun provideDeviceRepository(context: Context): DeviceRepository {
         return deviceRepository ?: synchronized(this) {
@@ -69,6 +74,15 @@ object ServiceLocator {
         }
     }
 
+    fun provideLocalPlaybackRepository(context: Context): LocalPlaybackRepository {
+        return localPlaybackRepository ?: synchronized(this) {
+            localPlaybackRepository ?: LocalPlaybackRepositoryImpl(
+                localPlaylistDao = provideDatabase(context).localPlaylistDao(),
+                localScheduleDao = provideDatabase(context).localScheduleDao(),
+            ).also { localPlaybackRepository = it }
+        }
+    }
+
     private fun provideDatabase(context: Context): AppDatabase {
         return appDatabase ?: synchronized(this) {
             appDatabase ?: Room.databaseBuilder(
@@ -84,9 +98,12 @@ object ServiceLocator {
     private fun provideManifestRepository(context: Context): ManifestRepository {
         return manifestRepository ?: synchronized(this) {
             manifestRepository ?: ManifestRepository(
+                database = provideDatabase(context),
                 manifestApi = provideManifestApi(),
                 mediaDao = provideDatabase(context).mediaDao(),
                 syncStateDao = provideDatabase(context).syncStateDao(),
+                localPlaylistDao = provideDatabase(context).localPlaylistDao(),
+                localScheduleDao = provideDatabase(context).localScheduleDao(),
             ).also { manifestRepository = it }
         }
     }
@@ -106,6 +123,10 @@ object ServiceLocator {
         return okHttpClient ?: synchronized(this) {
             okHttpClient ?: OkHttpClient.Builder()
                 .retryOnConnectionFailure(true)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .callTimeout(45, TimeUnit.SECONDS)
                 .build()
                 .also { okHttpClient = it }
         }

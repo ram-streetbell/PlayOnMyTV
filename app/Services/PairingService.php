@@ -32,6 +32,7 @@ class PairingService
 
         $now = new DateTimeImmutable();
         $device = $this->deviceRepository->findByUuid($deviceUuid);
+        error_log('DEVICE FOUND: ' . json_encode($device));
         $deviceName = $this->sanitizeDeviceName((string) ($payload['device_name'] ?? 'PlayOnMyTV Screen'));
         $appVersion = $this->sanitizeVersion((string) ($payload['app_version'] ?? 'unknown'));
         $firmwareVersion = $this->sanitizeOptional((string) ($payload['firmware_version'] ?? ''), 100);

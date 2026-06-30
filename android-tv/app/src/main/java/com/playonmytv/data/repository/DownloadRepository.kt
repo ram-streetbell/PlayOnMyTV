@@ -1,6 +1,7 @@
 package com.playonmytv.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
@@ -32,6 +33,7 @@ class DownloadRepository(
 
     override suspend fun enqueueDownload(request: MediaDownloadRequest) {
         upsertQueued(request)
+        Log.i(TAG, "event=download_queued mediaId=${request.id} filename=${request.filename} checksum=${request.checksum}")
 
         val work = OneTimeWorkRequestBuilder<DownloadWorker>()
             .setInputData(request.toWorkData())
@@ -77,6 +79,11 @@ class DownloadRepository(
                     updatedAt = request.updatedAt ?: existing?.updatedAt ?: now(),
                 )
             )
+            Log.i(
+                TAG,
+                "event=download_finished mediaId=${request.id} localPath=${result.localPath.orEmpty()} checksum=${result.checksum} skipped=${result.skipped}"
+            )
+            Log.i(TAG, "event=database_updated mediaId=${request.id} status=${DownloadStatus.COMPLETED.name}")
             result
         } catch (cancelled: Exception) {
             val status = if (cancelled is kotlinx.coroutines.CancellationException) {
@@ -85,6 +92,11 @@ class DownloadRepository(
                 DownloadStatus.FAILED
             }
             mediaDao.updateStatus(request.id, status.name)
+            Log.e(
+                TAG,
+                "event=download_failed mediaId=${request.id} status=${status.name} message=${cancelled.message}",
+                cancelled,
+            )
             throw cancelled
         }
     }
@@ -172,4 +184,8 @@ class DownloadRepository(
     private fun uniqueWorkName(mediaId: Long): String = "media-download-$mediaId"
 
     private fun now(): Long = Instant.now().toEpochMilli()
+
+    companion object {
+        private const val TAG = "DownloadRepository"
+    }
 }

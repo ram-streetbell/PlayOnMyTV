@@ -4,6 +4,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import com.playonmytv.worker.SyncWorker
 
 class DeviceSyncService : Service() {
@@ -15,22 +16,24 @@ class DeviceSyncService : Service() {
             ACTION_SCHEDULE_PERIODIC -> SyncWorker.enqueuePeriodic(applicationContext)
             else -> SyncWorker.enqueuePeriodic(applicationContext)
         }
+        Log.i(TAG, "event=device_sync_service action=${intent?.action ?: ACTION_SCHEDULE_PERIODIC}")
 
         stopSelf(startId)
         return START_NOT_STICKY
     }
 
     companion object {
+        private const val TAG = "DeviceSyncService"
         private const val ACTION_SYNC_NOW = "com.playonmytv.action.SYNC_NOW"
         private const val ACTION_SCHEDULE_PERIODIC = "com.playonmytv.action.SCHEDULE_PERIODIC_SYNC"
 
         fun requestImmediateSync(context: Context) {
-            context.startService(
-                Intent(context, DeviceSyncService::class.java).setAction(ACTION_SYNC_NOW)
-            )
+            Log.i(TAG, "event=device_sync_requested mode=immediate")
+            SyncWorker.enqueueImmediate(context.applicationContext)
         }
 
         fun schedulePeriodicSync(context: Context) {
+            Log.i(TAG, "event=device_sync_requested mode=periodic")
             SyncWorker.enqueuePeriodic(context.applicationContext)
         }
     }

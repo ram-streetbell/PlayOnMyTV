@@ -13,6 +13,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.playonmytv.app.di.ServiceLocator
+import com.playonmytv.data.remote.ManifestApiException
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(
@@ -23,10 +24,21 @@ class SyncWorker(
         val service = ServiceLocator.provideManifestSyncService(applicationContext)
 
         return try {
-            service.synchronize()
+            val execution = service.synchronize()
+            Log.i(
+                TAG,
+                "event=sync_worker_complete status=${execution.status} manifestVersion=${execution.manifestVersion ?: -1} queued=${execution.queuedDownloads} deleted=${execution.deletedMedia} pendingCleanup=${execution.pendingCleanup}"
+            )
             Result.success()
+        } catch (exception: ManifestApiException) {
+            Log.e(
+                TAG,
+                "event=sync_worker_failed status=${exception.statusCode ?: -1} retryable=${exception.retryable} message=${exception.message}",
+                exception,
+            )
+            if (exception.retryable) Result.retry() else Result.failure()
         } catch (exception: Exception) {
-            Log.e(TAG, "Background manifest sync failed.", exception)
+            Log.e(TAG, "event=sync_worker_failed status=unexpected message=${exception.message}", exception)
             Result.retry()
         }
     }

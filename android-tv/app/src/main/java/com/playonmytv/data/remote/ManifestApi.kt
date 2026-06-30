@@ -1,5 +1,6 @@
 package com.playonmytv.data.remote
 
+import android.util.Log
 import com.playonmytv.app.config.AppConfig
 import com.playonmytv.domain.model.ManifestDevice
 import com.playonmytv.domain.model.ManifestMediaItem
@@ -13,12 +14,17 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
+import java.net.SocketTimeoutException
 
 class ManifestApi(
     private val okHttpClient: OkHttpClient,
 ) {
     suspend fun fetchManifest(deviceToken: String): ManifestPayload = withContext(Dispatchers.IO) {
+        Log.i(TAG, "event=manifest_requested endpoint=${AppConfig.apiBaseUrl}/device/manifest")
+
         val request = Request.Builder()
             .url("${AppConfig.apiBaseUrl}/device/manifest")
             .get()
@@ -26,15 +32,96 @@ class ManifestApi(
             .header("Authorization", "Bearer $deviceToken")
             .build()
 
-        okHttpClient.newCall(request).execute().use { response ->
-            val responseText = response.body?.string().orEmpty()
-            val payload = if (responseText.isBlank()) JSONObject() else JSONObject(responseText)
+        try {
+            okHttpClient.newCall(request).execute().use { response ->
+                val responseText = response.body?.string().orEmpty()
+                val payload = responseText.toJsonObjectOrNull()
+                val message = payload?.optString("message")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: defaultMessageForStatus(response.code)
 
-            if (!response.isSuccessful || !payload.optBoolean("success", false)) {
-                throw IllegalStateException(payload.optString("message", "Unable to fetch device manifest."))
+                when (response.code) {
+                    200 -> {
+                        val successPayload = payload ?: throw ManifestApiException(
+                            message = "Manifest response body was empty or malformed.",
+                            statusCode = 200,
+                            retryable = false,
+                        )
+
+                        if (!successPayload.optBoolean("success", false)) {
+                            throw ManifestApiException(
+                                message = message,
+                                statusCode = 200,
+                                retryable = false,
+                            )
+                        }
+
+                        val manifest = try {
+                            parseManifest(successPayload.getJSONObject("data"))
+                        } catch (exception: JSONException) {
+                            throw ManifestApiException(
+                                message = "Manifest payload was malformed.",
+                                statusCode = 200,
+                                retryable = false,
+                                cause = exception,
+                            )
+                        }
+
+                        Log.i(
+                            TAG,
+                            "event=manifest_received status=200 manifestVersion=${manifest.manifestVersion} mediaCount=${manifest.media.size}"
+                        )
+                        Log.i(
+                            TAG,
+                            "event=manifest_parsed manifestVersion=${manifest.manifestVersion} playlists=${manifest.assignedPlaylists.size} schedules=${manifest.schedules.size} media=${manifest.media.size}"
+                        )
+                        manifest
+                    }
+
+                    401 -> throw ManifestApiException(
+                        message = message.ifBlank { "Device token is invalid or expired." },
+                        statusCode = 401,
+                        retryable = false,
+                    )
+
+                    404 -> throw ManifestApiException(
+                        message = message.ifBlank { "Manifest not found for this device." },
+                        statusCode = 404,
+                        retryable = false,
+                    )
+
+                    in 500..599 -> throw ManifestApiException(
+                        message = message,
+                        statusCode = response.code,
+                        retryable = true,
+                    )
+
+                    else -> throw ManifestApiException(
+                        message = message,
+                        statusCode = response.code,
+                        retryable = false,
+                    )
+                }
             }
-
-            parseManifest(payload.getJSONObject("data"))
+        } catch (exception: ManifestApiException) {
+            Log.e(
+                TAG,
+                "event=manifest_request_failed status=${exception.statusCode ?: -1} retryable=${exception.retryable} message=${exception.message}",
+                exception,
+            )
+            throw exception
+        } catch (exception: SocketTimeoutException) {
+            throw ManifestApiException(
+                message = "Manifest request timed out.",
+                retryable = true,
+                cause = exception,
+            )
+        } catch (exception: IOException) {
+            throw ManifestApiException(
+                message = "Manifest request failed due to a network error.",
+                retryable = true,
+                cause = exception,
+            )
         }
     }
 
@@ -146,5 +233,31 @@ class ManifestApi(
 
     private fun JSONObject.optNullableString(key: String): String? {
         return optString(key).takeIf { it.isNotBlank() && !isNull(key) }
+    }
+
+    private fun String.toJsonObjectOrNull(): JSONObject? {
+        if (isBlank()) {
+            return null
+        }
+
+        return try {
+            JSONObject(this)
+        } catch (_: JSONException) {
+            null
+        }
+    }
+
+    private fun defaultMessageForStatus(statusCode: Int): String {
+        return when (statusCode) {
+            200 -> "Manifest response could not be parsed."
+            401 -> "Device token is invalid or expired."
+            404 -> "Manifest not found for this device."
+            in 500..599 -> "Manifest service is temporarily unavailable."
+            else -> "Unable to fetch device manifest."
+        }
+    }
+
+    companion object {
+        private const val TAG = "ManifestApi"
     }
 }

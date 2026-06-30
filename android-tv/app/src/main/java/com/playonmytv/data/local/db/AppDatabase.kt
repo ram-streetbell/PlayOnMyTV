@@ -11,7 +11,9 @@ import com.playonmytv.data.local.dao.SyncStateDao
 import com.playonmytv.data.local.entities.DeviceConfigEntity
 import com.playonmytv.data.local.entities.LocalMediaEntity
 import com.playonmytv.data.local.entities.LocalPlaylistEntity
+import com.playonmytv.data.local.entities.LocalPlaylistItemEntity
 import com.playonmytv.data.local.entities.LocalScheduleEntity
+import com.playonmytv.data.local.entities.LocalScheduleSlotEntity
 import com.playonmytv.data.local.entities.MediaEntity
 import com.playonmytv.data.local.entities.SyncStateEntity
 
@@ -20,11 +22,13 @@ import com.playonmytv.data.local.entities.SyncStateEntity
         DeviceConfigEntity::class,
         LocalMediaEntity::class,
         LocalPlaylistEntity::class,
+        LocalPlaylistItemEntity::class,
         LocalScheduleEntity::class,
+        LocalScheduleSlotEntity::class,
         MediaEntity::class,
         SyncStateEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
