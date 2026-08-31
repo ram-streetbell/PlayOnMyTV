@@ -79,6 +79,7 @@ object ServiceLocator {
             localPlaybackRepository ?: LocalPlaybackRepositoryImpl(
                 localPlaylistDao = provideDatabase(context).localPlaylistDao(),
                 localScheduleDao = provideDatabase(context).localScheduleDao(),
+                mediaDao = provideDatabase(context).mediaDao(),
             ).also { localPlaybackRepository = it }
         }
     }
