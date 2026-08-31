@@ -3,6 +3,7 @@ package com.playonmytv.data.repository
 import com.playonmytv.data.local.dao.LocalActiveScheduleSlotRow
 import com.playonmytv.data.local.dao.LocalPlaylistDao
 import com.playonmytv.data.local.dao.LocalScheduleDao
+import com.playonmytv.data.local.dao.MediaDao
 import com.playonmytv.domain.model.LocalPlaybackCandidate
 import com.playonmytv.domain.model.LocalPlaybackMediaItem
 import com.playonmytv.domain.model.LocalPlaybackPlaylist
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.flow
 class LocalPlaybackRepositoryImpl(
     private val localPlaylistDao: LocalPlaylistDao,
     private val localScheduleDao: LocalScheduleDao,
+    private val mediaDao: MediaDao,
 ) : LocalPlaybackRepository {
     override suspend fun getCurrentSchedule(
         backendDayOfWeek: Int,
@@ -75,6 +77,32 @@ class LocalPlaybackRepositoryImpl(
         }
     }
 
+    override suspend fun getAllCompletedMediaList(): List<LocalPlaybackMediaItem> {
+        return mediaDao.findByStatuses(listOf(COMPLETED_STATUS))
+            .asSequence()
+            .filter { it.path.isNotBlank() }
+            .sortedWith(compareBy({ it.updatedAt }, { it.id }))
+            .mapIndexed { index, media ->
+                LocalPlaybackMediaItem(
+                    playlistItemId = media.id,
+                    playlistId = ALL_MEDIA_PLAYLIST_ID,
+                    mediaId = media.id,
+                    sortOrder = index,
+                    imageDurationSeconds = null,
+                    filename = media.filename,
+                    path = media.path,
+                    mediaType = media.mediaType,
+                    checksum = media.checksum,
+                    duration = media.duration,
+                    width = media.width,
+                    height = media.height,
+                    size = media.size,
+                    updatedAt = media.updatedAt,
+                )
+            }
+            .toList()
+    }
+
     override suspend fun getScheduleCandidates(): List<LocalPlaybackCandidate> {
         return localScheduleDao.findScheduleCandidates(activeStatus = ACTIVE_STATUS)
             .map { row ->
@@ -90,7 +118,7 @@ class LocalPlaybackRepositoryImpl(
         if (candidate == null) {
             return PlaybackSnapshot(
                 candidate = null,
-                mediaItems = emptyList(),
+                mediaItems = getAllCompletedMediaList(),
             )
         }
 
@@ -143,5 +171,6 @@ class LocalPlaybackRepositoryImpl(
     companion object {
         private const val ACTIVE_STATUS = "active"
         private const val COMPLETED_STATUS = "COMPLETED"
+        private const val ALL_MEDIA_PLAYLIST_ID = -1L
     }
 }
