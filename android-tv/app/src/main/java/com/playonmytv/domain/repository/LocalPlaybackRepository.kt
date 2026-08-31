@@ -17,6 +17,8 @@ interface LocalPlaybackRepository {
 
     suspend fun getOrderedMediaList(playlistId: Long): List<LocalPlaybackMediaItem>
 
+    suspend fun getAllCompletedMediaList(): List<LocalPlaybackMediaItem>
+
     suspend fun getScheduleCandidates(): List<LocalPlaybackCandidate>
 
     suspend fun getPlaybackSnapshot(candidate: LocalPlaybackCandidate?): PlaybackSnapshot
