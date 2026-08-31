@@ -6,6 +6,8 @@
     <string name="device_code_label">Device Code</string>
     <string name="waiting_for_pairing">Waiting for pairing...</string>
     <string name="generic_error">Something went wrong. Please try again.</string>
-    <string name="player_placeholder">Player ready. Playback implementation comes next.</string>
+    <string name="player_placeholder">Player</string>
+    <string name="player_waiting">Waiting for scheduled content…</string>
+    <string name="player_media_content_description">PlayOnMyTV media</string>
     <string name="settings_title">Settings Screen</string>
 </resources>
