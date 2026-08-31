@@ -12,7 +12,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
@@ -31,7 +30,9 @@ class MediaDownloader(
     ): DownloadResult = withContext(downloadDispatcher) {
         val finalFile = storageHelper.finalFileFor(request.filename, request.mediaType)
 
-        if (storageHelper.existingFileMatchesChecksum(request.filename, request.mediaType, request.checksum)) {
+        if (isUsableChecksum(request.checksum) &&
+            storageHelper.existingFileMatchesChecksum(request.filename, request.mediaType, request.checksum)
+        ) {
             return@withContext DownloadResult(
                 mediaId = request.id,
                 success = true,
@@ -44,7 +45,10 @@ class MediaDownloader(
 
         val partialFile = storageHelper.partialFileFor(request.filename, request.mediaType)
 
-        if (finalFile.exists() && !storageHelper.existingFileMatchesChecksum(request.filename, request.mediaType, request.checksum)) {
+        if (finalFile.exists() &&
+            (!isUsableChecksum(request.checksum) ||
+                !storageHelper.existingFileMatchesChecksum(request.filename, request.mediaType, request.checksum))
+        ) {
             storageHelper.ensureFreshDownloadTarget(request.filename, request.mediaType)
         }
 
@@ -64,17 +68,25 @@ class MediaDownloader(
 
         try {
             call.execute().use { response ->
-                if (!response.isSuccessful && response.code != 206) {
+                if (!response.isSuccessful) {
                     throw IllegalStateException("Download failed with HTTP ${response.code}.")
                 }
 
-                if (downloadedBytes > 0 && response.code == 200) {
+                val responseBody = response.body
+                    ?: throw IllegalStateException("Download response body was empty.")
+
+                val restartFromBeginning = downloadedBytes > 0 && response.code == 200
+                val append = downloadedBytes > 0 && response.code == 206
+                if (restartFromBeginning) {
                     partialFile.delete()
                 }
 
-                val responseBody = response.body ?: throw IllegalStateException("Download response body was empty.")
-                val totalBytes = resolveTotalBytes(response.header("Content-Range"), responseBody.contentLength(), downloadedBytes)
-                val append = downloadedBytes > 0 && response.code == 206
+                val initialBytes = if (append) downloadedBytes else 0L
+                val totalBytes = resolveTotalBytes(
+                    response.header("Content-Range"),
+                    responseBody.contentLength(),
+                    initialBytes,
+                )
 
                 RandomAccessFile(partialFile, "rw").use { output ->
                     if (append) {
@@ -85,15 +97,12 @@ class MediaDownloader(
 
                     responseBody.byteStream().use { input ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var bytesCopied = if (append) downloadedBytes else 0L
+                        var bytesCopied = initialBytes
 
                         while (true) {
                             coroutineContext.ensureActive()
-
                             val read = input.read(buffer)
-                            if (read == -1) {
-                                break
-                            }
+                            if (read == -1) break
 
                             output.write(buffer, 0, read)
                             bytesCopied += read
@@ -103,7 +112,11 @@ class MediaDownloader(
                                     mediaId = request.id,
                                     bytesDownloaded = bytesCopied,
                                     totalBytes = totalBytes,
-                                    percent = if (totalBytes > 0) ((bytesCopied * 100) / totalBytes).toInt() else 0,
+                                    percent = if (totalBytes > 0) {
+                                        ((bytesCopied * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                    } else {
+                                        0
+                                    },
                                 )
                             )
                         }
@@ -112,18 +125,23 @@ class MediaDownloader(
             }
 
             val committedFile = storageHelper.commitPartialDownload(request.filename, request.mediaType)
-            val actualChecksum = storageHelper.sha256(committedFile)
 
-            if (!actualChecksum.equals(request.checksum, ignoreCase = true)) {
-                committedFile.delete()
-                throw IllegalStateException("Checksum verification failed for media ${request.id}.")
+            // The current web backend uses a version identifier in this field rather
+            // than a SHA-256 digest. Only enforce checksum verification when the value
+            // is actually a SHA-256 digest (64 hexadecimal characters).
+            if (isUsableChecksum(request.checksum)) {
+                val actualChecksum = storageHelper.sha256(committedFile)
+                if (!actualChecksum.equals(request.checksum, ignoreCase = true)) {
+                    committedFile.delete()
+                    throw IllegalStateException("Checksum verification failed for media ${request.id}.")
+                }
             }
 
             DownloadResult(
                 mediaId = request.id,
                 success = true,
                 localPath = committedFile.absolutePath,
-                checksum = actualChecksum,
+                checksum = request.checksum,
                 skipped = false,
                 message = "Download completed successfully.",
             )
@@ -138,6 +156,9 @@ class MediaDownloader(
         activeCalls.remove(mediaId)?.cancel()
     }
 
+    private fun isUsableChecksum(value: String): Boolean =
+        value.length == 64 && value.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+
     private fun resolveTotalBytes(contentRange: String?, responseLength: Long, downloadedBytes: Long): Long {
         val totalFromHeader = contentRange
             ?.substringAfterLast('/')
@@ -149,5 +170,4 @@ class MediaDownloader(
             else -> responseLength
         }
     }
-
 }
