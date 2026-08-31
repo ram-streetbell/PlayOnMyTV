@@ -15,7 +15,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.playonmytv.domain.model.LocalPlaybackCandidate
 import com.playonmytv.domain.model.LocalPlaybackMediaItem
 import com.playonmytv.domain.model.PlaybackSnapshot
 import com.playonmytv.domain.repository.LocalPlaybackRepository
@@ -68,9 +67,7 @@ class PlaybackCoordinator(
     }
 
     fun start(scope: CoroutineScope) {
-        if (isStarted) {
-            return
-        }
+        if (isStarted) return
 
         this.scope = scope
         isStarted = true
@@ -100,20 +97,16 @@ class PlaybackCoordinator(
         exoPlayer.release()
     }
 
-    fun playNext() {
-        onCurrentItemFinished(reason = "manual_next")
-    }
+    fun playNext() = onCurrentItemFinished(reason = "manual_next")
 
     fun playPrevious() {
         val snapshot = activeSnapshotOrPending() ?: return
-        if (snapshot.mediaItems.isEmpty()) {
-            return
-        }
+        if (snapshot.mediaItems.isEmpty()) return
 
         val lastIndex = snapshot.mediaItems.lastIndex
         currentIndex = when {
             currentIndex > 0 -> currentIndex - 1
-            snapshot.candidate?.playlist?.isLooping == true -> lastIndex
+            snapshot.candidate == null || snapshot.candidate.playlist.isLooping -> lastIndex
             else -> 0
         }
         playCurrent(snapshot, fromScheduleChange = false)
@@ -122,11 +115,7 @@ class PlaybackCoordinator(
     private suspend fun handleSnapshot(snapshot: PlaybackSnapshot) {
         val previousCandidate = currentSnapshot.candidate
         val currentCandidate = snapshot.candidate
-        val changed = snapshot != currentSnapshot
-
-        if (!changed) {
-            return
-        }
+        if (snapshot == currentSnapshot) return
 
         if (previousCandidate?.slot?.slotId != currentCandidate?.slot?.slotId) {
             Log.i(
@@ -137,59 +126,50 @@ class PlaybackCoordinator(
 
         if (!isMediaInProgress()) {
             applySnapshot(snapshot, fromScheduleChange = true)
-            return
+        } else {
+            pendingSnapshot = snapshot
         }
-
-        pendingSnapshot = snapshot
     }
 
-    private fun applySnapshot(
-        snapshot: PlaybackSnapshot,
-        fromScheduleChange: Boolean,
-    ) {
+    private fun applySnapshot(snapshot: PlaybackSnapshot, fromScheduleChange: Boolean) {
         currentSnapshot = snapshot
         pendingSnapshot = null
 
         if (snapshot.isIdle) {
-            showIdle("No scheduled content")
+            showIdle("No content available")
             return
         }
 
         currentIndex = resolveStartingIndex(snapshot)
-        val candidate = snapshot.candidate ?: return
-        Log.i(
-            TAG,
-            "event=schedule_selected scheduleId=${candidate.schedule.scheduleId} slotId=${candidate.slot.slotId} playlistId=${candidate.playlist.playlistId}"
-        )
-        Log.i(
-            TAG,
-            "event=playlist_loaded playlistId=${candidate.playlist.playlistId} items=${snapshot.mediaItems.size} looping=${candidate.playlist.isLooping}"
-        )
-        if (fromScheduleChange) {
-            Log.i(TAG, "event=playlist_refreshed playlistId=${candidate.playlist.playlistId}")
+        val candidate = snapshot.candidate
+        if (candidate == null) {
+            Log.i(TAG, "event=all_media_selected items=${snapshot.mediaItems.size} looping=true")
+        } else {
+            Log.i(
+                TAG,
+                "event=schedule_selected scheduleId=${candidate.schedule.scheduleId} slotId=${candidate.slot.slotId} playlistId=${candidate.playlist.playlistId}"
+            )
+            Log.i(
+                TAG,
+                "event=playlist_loaded playlistId=${candidate.playlist.playlistId} items=${snapshot.mediaItems.size} looping=${candidate.playlist.isLooping}"
+            )
+            if (fromScheduleChange) {
+                Log.i(TAG, "event=playlist_refreshed playlistId=${candidate.playlist.playlistId}")
+            }
         }
         playCurrent(snapshot, fromScheduleChange)
     }
 
-    private fun playCurrent(
-        snapshot: PlaybackSnapshot,
-        fromScheduleChange: Boolean,
-    ) {
+    private fun playCurrent(snapshot: PlaybackSnapshot, fromScheduleChange: Boolean) {
         if (snapshot.mediaItems.isEmpty()) {
-            showIdle("No scheduled content")
+            showIdle("No content available")
             return
         }
 
-        val boundedIndex = currentIndex.coerceIn(0, snapshot.mediaItems.lastIndex)
-        currentIndex = boundedIndex
-
-        val candidate = snapshot.candidate ?: run {
-            showIdle("No scheduled content")
-            return
-        }
+        currentIndex = currentIndex.coerceIn(0, snapshot.mediaItems.lastIndex)
 
         var attempts = 0
-        var index = boundedIndex
+        var index = currentIndex
 
         while (attempts < snapshot.mediaItems.size) {
             val item = snapshot.mediaItems[index]
@@ -206,11 +186,11 @@ class PlaybackCoordinator(
             currentMediaItem = item
 
             if (isImage(item)) {
-                if (displayImage(item, file.toUri())) {
-                    return
-                }
+                if (displayImage(item, file.toUri())) return
             } else if (isVideo(item)) {
-                playVideo(item, file.toUri(), candidate.playlist.isLooping && snapshot.mediaItems.size == 1)
+                val loopSingleItem = snapshot.candidate == null ||
+                    (snapshot.candidate.playlist.isLooping && snapshot.mediaItems.size == 1)
+                playVideo(item, file.toUri(), loopSingleItem)
                 return
             } else {
                 Log.e(TAG, "event=media_skipped reason=unsupported_type mediaId=${item.mediaId} type=${item.mediaType}")
@@ -220,7 +200,7 @@ class PlaybackCoordinator(
             attempts += 1
         }
 
-        showIdle("No scheduled content")
+        showIdle("No content available")
     }
 
     private fun displayImage(item: LocalPlaybackMediaItem, uri: Uri): Boolean {
@@ -267,10 +247,7 @@ class PlaybackCoordinator(
         Log.i(TAG, "event=media_started mediaId=${item.mediaId} type=video")
     }
 
-    private fun onCurrentItemFinished(
-        reason: String,
-        logCompleted: Boolean = true,
-    ) {
+    private fun onCurrentItemFinished(reason: String, logCompleted: Boolean = true) {
         if (logCompleted) {
             Log.i(TAG, "event=media_completed mediaId=${currentMediaItem?.mediaId ?: -1} reason=$reason")
         }
@@ -284,18 +261,18 @@ class PlaybackCoordinator(
 
         val snapshot = activeSnapshotOrPending() ?: return
         if (snapshot.mediaItems.isEmpty()) {
-            showIdle("No scheduled content")
+            showIdle("No content available")
             return
         }
 
         val nextIndex = when {
             currentIndex < snapshot.mediaItems.lastIndex -> currentIndex + 1
-            snapshot.candidate?.playlist?.isLooping == true -> {
-                Log.i(TAG, "event=playlist_looped playlistId=${snapshot.candidate.playlist.playlistId}")
+            snapshot.candidate == null || snapshot.candidate.playlist.isLooping -> {
+                Log.i(TAG, "event=playlist_looped playlistId=${snapshot.candidate?.playlist?.playlistId ?: -1}")
                 0
             }
             else -> {
-                showIdle("No scheduled content")
+                showIdle("No content available")
                 return
             }
         }
@@ -310,9 +287,7 @@ class PlaybackCoordinator(
         imageTimerJob = null
         stopVideoPlayback()
         currentMediaItem = null
-        if (showIdle) {
-            showIdle("No scheduled content")
-        }
+        if (showIdle) showIdle("No content available")
     }
 
     private fun showIdle(message: String) {
@@ -328,16 +303,14 @@ class PlaybackCoordinator(
     }
 
     private fun stopVideoPlayback() {
-        if (exoPlayer.isPlaying || exoPlayer.playbackState != Player.STATE_IDLE) {
-            exoPlayer.stop()
-        }
+        if (exoPlayer.isPlaying || exoPlayer.playbackState != Player.STATE_IDLE) exoPlayer.stop()
         exoPlayer.clearMediaItems()
     }
 
     private fun computeNextIndex(index: Int, snapshot: PlaybackSnapshot): Int {
         return when {
             index < snapshot.mediaItems.lastIndex -> index + 1
-            snapshot.candidate?.playlist?.isLooping == true -> 0
+            snapshot.candidate == null || snapshot.candidate.playlist.isLooping -> 0
             else -> snapshot.mediaItems.lastIndex
         }
     }
@@ -345,30 +318,27 @@ class PlaybackCoordinator(
     private fun resolveStartingIndex(snapshot: PlaybackSnapshot): Int {
         val previousMediaId = currentMediaItem?.mediaId ?: return 0
         val matchedIndex = snapshot.mediaItems.indexOfFirst { it.mediaId == previousMediaId }
-        if (matchedIndex == -1) {
-            return 0
-        }
+        if (matchedIndex == -1) return 0
 
         return if (matchedIndex < snapshot.mediaItems.lastIndex) matchedIndex + 1
-        else if (snapshot.candidate?.playlist?.isLooping == true) 0
+        else if (snapshot.candidate == null || snapshot.candidate.playlist.isLooping) 0
         else matchedIndex
     }
 
     private fun activeSnapshotOrPending(): PlaybackSnapshot? {
-        return pendingSnapshot ?: currentSnapshot.takeIf { !it.isIdle || it.candidate != null }
+        return pendingSnapshot ?: currentSnapshot.takeIf { !it.isIdle }
     }
 
     private fun isMediaInProgress(): Boolean {
-        return currentMediaItem != null && (imageTimerJob?.isActive == true || exoPlayer.isPlaying || exoPlayer.playbackState == Player.STATE_BUFFERING)
+        return currentMediaItem != null &&
+            (imageTimerJob?.isActive == true || exoPlayer.isPlaying || exoPlayer.playbackState == Player.STATE_BUFFERING)
     }
 
-    private fun isImage(item: LocalPlaybackMediaItem): Boolean {
-        return item.mediaType.lowercase(Locale.US) == "image"
-    }
+    private fun isImage(item: LocalPlaybackMediaItem): Boolean =
+        item.mediaType.lowercase(Locale.US) == "image"
 
-    private fun isVideo(item: LocalPlaybackMediaItem): Boolean {
-        return item.mediaType.lowercase(Locale.US) == "video"
-    }
+    private fun isVideo(item: LocalPlaybackMediaItem): Boolean =
+        item.mediaType.lowercase(Locale.US) == "video"
 
     companion object {
         private const val TAG = "PlaybackCoordinator"
