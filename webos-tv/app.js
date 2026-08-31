@@ -1,44 +1,148 @@
 const DEFAULT_API = 'https://playonmytv-web.onrender.com/api/v1';
+const APP_VERSION = '1.1.0';
 const DB_NAME = 'playonmytv-webos';
 const DB_VERSION = 1;
 const STORE = 'media';
 const SYNC_INTERVAL = 5 * 60 * 1000;
+const PAIRING_POLL_INTERVAL = 3000;
+const PAIRING_EXPIRES_FALLBACK = 10 * 60 * 1000;
 
-let apiBase = localStorage.getItem('playonmytv.api') || DEFAULT_API;
+let apiBase = DEFAULT_API;
 let token = localStorage.getItem('playonmytv.token') || '';
+let deviceUuid = localStorage.getItem('playonmytv.deviceUuid') || createUuid();
+let pairingExpiresAt = 0;
 let manifest = null;
 let playlist = [];
 let currentIndex = 0;
 let currentObjectUrl = null;
 let rotationTimer = null;
 let syncTimer = null;
+let pairingTimer = null;
+let pairingRequestInFlight = false;
+let syncInFlight = false;
+
+localStorage.setItem('playonmytv.deviceUuid', deviceUuid);
 
 const $ = (id) => document.getElementById(id);
 
-$('apiUrl').value = apiBase;
-$('token').value = token;
-$('connect').addEventListener('click', connectAndSync);
-$('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') connectAndSync(); });
-$('apiUrl').addEventListener('change', () => { apiBase = $('apiUrl').value.trim().replace(/\/$/, ''); });
+openDb().then(() => bootstrap()).catch((error) => showPairingError(error));
 
-openDb().then(() => {
-  if (token) connectAndSync();
-});
+async function bootstrap() {
+  if (token) {
+    try {
+      await sync();
+      return;
+    } catch (_) {
+      token = '';
+      localStorage.removeItem('playonmytv.token');
+    }
+  }
+  showPairing();
+  await requestPairingCode();
+  startPairingPolling();
+}
 
-async function connectAndSync() {
-  apiBase = $('apiUrl').value.trim().replace(/\/$/, '') || DEFAULT_API;
-  token = $('token').value.trim();
-  if (!token) {
-    $('setupError').textContent = 'Enter the device token first.';
+function createUuid() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
+function showPairing() {
+  $('pairing').hidden = false;
+  $('player').hidden = true;
+  $('pairingCode').textContent = '------';
+  $('pairingState').textContent = 'Connecting…';
+  $('pairingError').textContent = '';
+}
+
+async function requestPairingCode() {
+  if (pairingRequestInFlight) return;
+  pairingRequestInFlight = true;
+  showPairing();
+  $('pairingState').textContent = 'Getting device code…';
+  try {
+    const response = await fetch(`${apiBase}/device/pairing/start`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_uuid: deviceUuid,
+        device_name: 'LG webOS TV',
+        app_version: APP_VERSION
+      }),
+      cache: 'no-store'
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body || !body.success || !body.data) {
+      throw new Error((body && (body.message || body.error)) || `Pairing request failed (${response.status})`);
+    }
+    const data = body.data;
+    $('pairingCode').textContent = formatCode(data.pairing_code);
+    $('pairingState').textContent = 'Waiting for pairing…';
+    pairingExpiresAt = Date.parse(data.expires_at || '') || (Date.now() + PAIRING_EXPIRES_FALLBACK);
+    $('pairingError').textContent = '';
+  } catch (error) {
+    $('pairingState').textContent = 'Unable to connect';
+    showPairingError(error);
+  } finally {
+    pairingRequestInFlight = false;
+  }
+}
+
+function formatCode(code) {
+  const value = String(code || '').replace(/\D/g, '').slice(0, 6);
+  return value.length === 6 ? `${value.slice(0,3)} ${value.slice(3)}` : '------';
+}
+
+function startPairingPolling() {
+  clearInterval(pairingTimer);
+  pairingTimer = setInterval(checkPairingStatus, PAIRING_POLL_INTERVAL);
+  checkPairingStatus();
+}
+
+async function checkPairingStatus() {
+  if (pairingRequestInFlight || pairingTimer === null) return;
+  if (Date.now() >= pairingExpiresAt) {
+    await requestPairingCode();
     return;
   }
-  localStorage.setItem('playonmytv.api', apiBase);
-  localStorage.setItem('playonmytv.token', token);
-  $('setupError').textContent = '';
-  await sync();
+  try {
+    const response = await fetch(`${apiBase}/device/pairing/status`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_uuid: deviceUuid }),
+      cache: 'no-store'
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body || !body.success) throw new Error((body && (body.message || body.error)) || `Pairing status failed (${response.status})`);
+    const data = body.data || {};
+    if (!data.waiting && data.device_token) {
+      token = String(data.device_token);
+      localStorage.setItem('playonmytv.token', token);
+      clearInterval(pairingTimer);
+      pairingTimer = null;
+      $('pairingCode').textContent = '✓';
+      $('pairingState').textContent = 'TV paired. Preparing content…';
+      await sync();
+    }
+  } catch (error) {
+    showPairingError(error);
+  }
+}
+
+function showPairingError(error) {
+  console.error(error);
+  $('pairingError').textContent = error && error.message ? error.message : 'Unable to connect. Retrying…';
 }
 
 async function sync() {
+  if (!token || syncInFlight) return;
+  syncInFlight = true;
   setStatus('Checking for updates…');
   try {
     const response = await fetch(`${apiBase}/device/manifest`, {
@@ -47,7 +151,7 @@ async function sync() {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body || !body.success) {
-      throw new Error((body && body.message) || `Manifest request failed (${response.status})`);
+      throw new Error((body && (body.message || body.error)) || `Manifest request failed (${response.status})`);
     }
 
     manifest = body.data;
@@ -55,26 +159,31 @@ async function sync() {
     await syncMedia(manifest.media || []);
     localStorage.setItem('playonmytv.manifestVersion', String(manifest.manifest_version || ''));
 
+    showPlayer();
     if (!playlist.length) {
-      showPlayer();
-      setStatus('No media assigned');
+      setStatus('No media available');
+      showSync(false);
       return;
     }
-
-    showPlayer();
     startPlayback(true);
-    setStatus(`Synced ${playlist.length} media item${playlist.length === 1 ? '' : 's'}`);
+    setStatus(`Ready · ${playlist.length} media item${playlist.length === 1 ? '' : 's'}`);
   } catch (error) {
     console.error(error);
     if (manifest && playlist.length) {
       showPlayer();
       startPlayback(false);
       setStatus('Offline mode');
+    } else if (String(error.message || '').toLowerCase().includes('token')) {
+      token = '';
+      localStorage.removeItem('playonmytv.token');
+      showPairing();
+      await requestPairingCode();
+      startPairingPolling();
     } else {
-      $('setup').hidden = false;
-      $('player').hidden = true;
-      $('setupError').textContent = error.message || 'Unable to connect.';
+      throw error;
     }
+  } finally {
+    syncInFlight = false;
   }
 }
 
@@ -94,39 +203,44 @@ function buildPlaylist(data) {
 async function syncMedia(items) {
   if (!items.length) return;
   const db = await openDb();
-  const work = [];
   let total = items.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
   let completed = 0;
-  let downloaded = 0;
+  let downloadedBytes = 0;
+  let downloadedItems = 0;
+  const work = [];
 
-  showSync(true, 0);
+  showSync(true, 0, `Preparing ${items.length} item${items.length === 1 ? '' : 's'}…`);
   for (const item of items) {
-    const key = cacheKey(item);
-    const existing = await idbGet(db, key);
+    const existing = await idbGet(db, cacheKey(item));
     if (existing && existing.blob) {
-      completed += Number(item.size) || 0;
-      downloaded += Number(item.size) || 0;
-      updateSync(total, completed, downloaded, items.length);
-      continue;
+      completed += Number(item.size) || existing.blob.size || 0;
+      downloadedBytes += Number(item.size) || existing.blob.size || 0;
+      downloadedItems++;
+    } else {
+      work.push(item);
     }
-    work.push(item);
+    updateSync(total, completed, downloadedBytes, items.length, downloadedItems);
   }
 
   for (const item of work) {
+    showSync(true, total ? Math.round((completed / total) * 100) : 0, `Downloading ${downloadedItems + 1} of ${items.length}…`);
     try {
       const blob = await downloadBlob(item, (bytes) => {
-        const current = completed + bytes;
-        updateSync(total, current, downloaded, items.length);
+        updateSync(total, completed + bytes, downloadedBytes, items.length, downloadedItems);
       });
       await idbPut(db, { key: cacheKey(item), mediaId: String(item.id), checksum: item.checksum, blob, updatedAt: item.updated_at });
       completed += Number(item.size) || blob.size || 0;
-      downloaded += Number(item.size) || blob.size || 0;
+      downloadedBytes += Number(item.size) || blob.size || 0;
+      downloadedItems++;
     } catch (error) {
       console.warn('Media cache failed', item.id, error);
       completed += Number(item.size) || 0;
+      downloadedItems++;
     }
-    updateSync(total, completed, downloaded, items.length);
+    updateSync(total, completed, downloadedBytes, items.length, downloadedItems);
   }
+  showSync(true, 100, 'Sync complete');
+  await new Promise(resolve => setTimeout(resolve, 350));
   showSync(false);
 }
 
@@ -182,7 +296,7 @@ async function playCurrent() {
 
   const cachedUrl = await getCachedMedia(item);
   const src = cachedUrl || item.storage_url;
-  setStatus(cachedUrl ? 'Playing offline media' : 'Playing network media');
+  setStatus(cachedUrl ? 'Playing cached media' : 'Playing network media');
 
   if (item.type === 'image') {
     $('image').src = src;
@@ -204,9 +318,9 @@ async function playCurrent() {
   };
   try {
     await video.play();
-  } catch (error) {
-    setStatus('Press OK to start video');
-    video.onkeydown = () => video.play().catch(() => {});
+  } catch (_) {
+    setStatus('Video ready');
+    video.focus();
   }
 }
 
@@ -223,27 +337,29 @@ function releaseObjectUrl() {
 }
 
 function showPlayer() {
-  $('setup').hidden = true;
+  $('pairing').hidden = true;
   $('player').hidden = false;
-  if (!syncTimer) syncTimer = setInterval(sync, SYNC_INTERVAL);
+  if (!syncTimer) syncTimer = setInterval(() => sync().catch(error => console.error(error)), SYNC_INTERVAL);
 }
 
 function setStatus(text) {
   $('status').textContent = text;
 }
 
-function showSync(show, percent = 0) {
+function showSync(show, percent = 0, title = 'Preparing content…') {
   $('sync').hidden = !show;
   if (show) {
-    $('syncBar').style.width = `${percent}%`;
-    $('syncText').textContent = `${percent}%`;
+    $('syncBar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    $('syncText').textContent = `${Math.max(0, Math.min(100, percent))}%`;
+    $('syncTitle').textContent = title;
   }
 }
 
-function updateSync(total, completed, downloaded, count) {
-  const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : Math.min(100, Math.round((downloaded / Math.max(1, count)) * 100));
-  showSync(true, percent);
-  $('syncText').textContent = `${percent}%`;
+function updateSync(total, completed, downloadedBytes, count, downloadedItems) {
+  const percent = total > 0
+    ? Math.min(100, Math.round((completed / total) * 100))
+    : Math.min(100, Math.round((downloadedItems / Math.max(1, count)) * 100));
+  showSync(true, percent, `Preparing content… ${downloadedItems} of ${count}`);
 }
 
 function openDb() {
