@@ -42,6 +42,7 @@ class PlayerActivity : AppCompatActivity() {
         val playbackRepository = LocalPlaybackRepositoryImpl(
             localPlaylistDao = database!!.localPlaylistDao(),
             localScheduleDao = database!!.localScheduleDao(),
+            mediaDao = database!!.mediaDao(),
         )
 
         coordinator = PlaybackCoordinator(
