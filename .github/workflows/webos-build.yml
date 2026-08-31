@@ -1,0 +1,43 @@
+name: LG webOS TV Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'webos-tv/**'
+      - '.github/workflows/webos-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+
+      - name: Install webOS CLI
+        run: npm install -g @webos-tools/cli
+
+      - name: Generate required PNG icons
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          convert -background none webos-tv/icon.svg -resize 80x80 webos-tv/icon.png
+          convert -background none webos-tv/icon.svg -resize 130x130 webos-tv/largeicon.png
+
+      - name: Validate app metadata
+        run: ares-package --check webos-tv
+
+      - name: Package webOS app
+        run: ares-package webos-tv -o webos-tv/dist
+
+      - name: Upload IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: playonmytv-webos-ipk
+          path: webos-tv/dist/*.ipk
