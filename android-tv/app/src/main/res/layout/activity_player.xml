@@ -21,6 +21,48 @@
         android:scaleType="fitCenter"
         android:visibility="gone" />
 
+    <LinearLayout
+        android:id="@+id/sync_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="48dp">
+
+        <TextView
+            android:id="@+id/sync_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Syncing content…"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/sync_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="520dp"
+            android:layout_height="12dp"
+            android:layout_marginTop="28dp"
+            android:max="100"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/sync_detail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Preparing media…"
+            android:textColor="#BDBDBD"
+            android:textSize="18sp" />
+
+        <ProgressBar
+            android:id="@+id/sync_spinner"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginTop="24dp" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/idle_text"
         android:layout_width="match_parent"
@@ -28,6 +70,7 @@
         android:gravity="center"
         android:text="@string/player_waiting"
         android:textColor="#FFFFFF"
-        android:textSize="24sp" />
+        android:textSize="24sp"
+        android:visibility="gone" />
 
 </FrameLayout>
