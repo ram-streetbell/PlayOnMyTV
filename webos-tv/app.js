@@ -161,6 +161,7 @@ async function sync() {
 
     showPlayer();
     if (!playlist.length) {
+      $('empty').hidden = false;
       setStatus('No media available');
       showSync(false);
       return;
@@ -339,6 +340,7 @@ function releaseObjectUrl() {
 function showPlayer() {
   $('pairing').hidden = true;
   $('player').hidden = false;
+  if (!playlist.length) $('empty').hidden = false;
   if (!syncTimer) syncTimer = setInterval(() => sync().catch(error => console.error(error)), SYNC_INTERVAL);
 }
 
