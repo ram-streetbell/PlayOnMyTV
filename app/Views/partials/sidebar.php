@@ -6,8 +6,8 @@
             <li class="nav-item"><a class="nav-link" href="/media">Media</a></li>
             <li class="nav-item"><a class="nav-link" href="/playlists">Playlists</a></li>
             <li class="nav-item"><a class="nav-link" href="/schedules">Schedules</a></li>
+            <li class="nav-item"><a class="nav-link" href="/downloads">Downloads</a></li>
             <li class="nav-item"><a class="nav-link" href="/settings">Settings</a></li>
         </ul>
     </div>
 </nav>
-
