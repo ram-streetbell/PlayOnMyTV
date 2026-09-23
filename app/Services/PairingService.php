@@ -65,7 +65,7 @@ class PairingService
                 $deviceId = $this->deviceRepository->createPending([
                     'device_uuid' => $deviceUuid,
                     'device_name' => $deviceName,
-                    'platform' => 'android-tv',
+                    'platform' => (string) ($payload['platform'] ?? 'android-tv'),
                     'app_version' => $appVersion,
                     'firmware_version' => $firmwareVersion,
                     'pairing_code' => $pairingCode,
