@@ -34,6 +34,7 @@ class PairingService
         $device = $this->deviceRepository->findByUuid($deviceUuid);
         error_log('DEVICE FOUND: ' . json_encode($device));
         $deviceName = $this->sanitizeDeviceName((string) ($payload['device_name'] ?? 'PlayOnMyTV Screen'));
+        $platform = $this->sanitizeOptional((string) ($payload['platform'] ?? ''), 50) ?? 'android-tv';
         $appVersion = $this->sanitizeVersion((string) ($payload['app_version'] ?? 'unknown'));
         $firmwareVersion = $this->sanitizeOptional((string) ($payload['firmware_version'] ?? ''), 100);
         $timezone = $this->sanitizeOptional((string) ($payload['timezone'] ?? ''), 64);
@@ -65,7 +66,7 @@ class PairingService
                 $deviceId = $this->deviceRepository->createPending([
                     'device_uuid' => $deviceUuid,
                     'device_name' => $deviceName,
-                    'platform' => (string) ($payload['platform'] ?? 'android-tv'),
+                    'platform' => $platform,
                     'app_version' => $appVersion,
                     'firmware_version' => $firmwareVersion,
                     'pairing_code' => $pairingCode,
@@ -80,6 +81,7 @@ class PairingService
                 $deviceId = (int) $device['id'];
                 $this->deviceRepository->updatePairingState($deviceId, [
                     'device_name' => $deviceName,
+                    'platform' => $platform,
                     'app_version' => $appVersion,
                     'firmware_version' => $firmwareVersion,
                     'pairing_code' => $pairingCode,
