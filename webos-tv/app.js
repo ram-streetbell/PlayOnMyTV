@@ -1,10 +1,10 @@
 const DEFAULT_API = 'https://playonmytv-web.onrender.com/api/v1';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const DB_NAME = 'playonmytv-webos';
 const DB_VERSION = 1;
 const STORE = 'media';
 const SYNC_INTERVAL = 5 * 60 * 1000;
-const PAIRING_POLL_INTERVAL = 3000;
+const PAIRING_POLL_INTERVAL = 2500;
 const PAIRING_EXPIRES_FALLBACK = 10 * 60 * 1000;
 
 let apiBase = DEFAULT_API;
@@ -59,6 +59,7 @@ function showPairing() {
   $('pairingCode').textContent = '------';
   $('pairingState').textContent = 'Connecting…';
   $('pairingError').textContent = '';
+  document.body.classList.add('pairing-active');
 }
 
 async function requestPairingCode() {
@@ -73,12 +74,14 @@ async function requestPairingCode() {
       body: JSON.stringify({
         device_uuid: deviceUuid,
         device_name: 'LG webOS TV',
-        app_version: APP_VERSION
+        platform: 'webos-tv',
+        app_version: APP_VERSION,
+        screen_resolution: '1920x1080'
       }),
       cache: 'no-store'
     });
     const body = await response.json().catch(() => null);
-    if (!response.ok || !body || !body.success || !body.data) {
+    if (!response.ok || !body || body.success === false || !body.data) {
       throw new Error((body && (body.message || body.error)) || `Pairing request failed (${response.status})`);
     }
     const data = body.data;
@@ -95,7 +98,7 @@ async function requestPairingCode() {
 }
 
 function formatCode(code) {
-  const value = String(code || '').replace(/\D/g, '').slice(0, 6);
+  const value = String(code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 6);
   return value.length === 6 ? `${value.slice(0,3)} ${value.slice(3)}` : '------';
 }
 
@@ -340,6 +343,7 @@ function releaseObjectUrl() {
 function showPlayer() {
   $('pairing').hidden = true;
   $('player').hidden = false;
+  document.body.classList.remove('pairing-active');
   if (!playlist.length) $('empty').hidden = false;
   if (!syncTimer) syncTimer = setInterval(() => sync().catch(error => console.error(error)), SYNC_INTERVAL);
 }
